@@ -2,18 +2,24 @@ import type { AppState, Tour } from './types'
 
 const KEY = 'ekipazh.v1'
 
+export function migrateState(parsed: unknown): AppState | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const state = parsed as AppState
+  if (!Array.isArray(state.tours)) return null
+  for (const tour of state.tours) {
+    if (!tour || !Array.isArray(tour.people)) return null
+    for (const person of tour.people) {
+      if ((person.experience as string) === 'pro') person.experience = 'regular'
+    }
+  }
+  return state
+}
+
 export function loadState(): AppState | null {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as AppState
-    if (!Array.isArray(parsed.tours)) return null
-    for (const tour of parsed.tours) {
-      for (const person of tour.people) {
-        if ((person.experience as string) === 'pro') person.experience = 'regular'
-      }
-    }
-    return parsed
+    return migrateState(JSON.parse(raw))
   } catch {
     return null
   }
