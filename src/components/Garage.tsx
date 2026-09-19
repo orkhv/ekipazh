@@ -44,10 +44,7 @@ export function Garage({
               {count.riding} / {count.seats} мест
             </span>
           </div>
-          <p className="hint">
-            Жёлтая кнопка делит людей по машинам. Кто куда сядет внутри — решаете сами. Чтобы
-            пересадить, ткни человека и другую машину.
-          </p>
+          <p className="hint">Кто в какой машине — и можно сразу в чат.</p>
         </div>
         <div className="actions">
           <button className="btn primary" type="button" onClick={onGenerate}>

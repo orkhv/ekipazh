@@ -82,12 +82,9 @@ export function App() {
     <div className="app">
       <header className="mast">
         <div className="brand">
-          <span className="stamp">утренний строй</span>
+          <span className="stamp">доброе утро</span>
           <h1>Экипаж</h1>
-          <p>
-            Две машины, пары не рвём, новичков чаще к тебе, крупных разводим.
-            Кто куда сядет внутри — уже сами. История дней помогает не повторять экипажи.
-          </p>
+          <p>Две машины, свои люди, утро перед дорогой. Здесь только кто с кем едет.</p>
         </div>
         <div className="mast-side">
           <div className="tour-switch">
