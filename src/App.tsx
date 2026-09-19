@@ -89,7 +89,10 @@ export function App() {
       const next = readHashRoom()
       if (next) void applyRoom(next, false)
     }
+    let lastWake = 0
     const onWake = () => {
+      if (Date.now() - lastWake < 4000) return
+      lastWake = Date.now()
       const current = peekRoomId()
       if (current) void applyRoom(current, true)
     }

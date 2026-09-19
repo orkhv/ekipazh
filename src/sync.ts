@@ -4,8 +4,10 @@ import type { AppState } from './types'
 const ROOM_KEY = 'ekipazh.room'
 const ROOM_STAMP_KEY = 'ekipazh.room.updatedAt'
 const DIRTY_KEY = 'ekipazh.localDirtyAt'
-const API = 'https://api.restful-api.dev/objects'
+const POINTER_API = 'https://api.restful-api.dev/objects'
+const BLOB_API = 'https://dpaste.com/api/v2/'
 const ROOM_RE = /^[a-zA-Z0-9]{8,80}$/
+const BLOB_RE = /^[a-zA-Z0-9]{6,16}$/
 
 export interface RoomEnvelope {
   updatedAt: number
@@ -76,12 +78,10 @@ export function writeDirtyAt(updatedAt: number): void {
 }
 
 function envelopeFromUnknown(value: unknown): RoomEnvelope | null {
-  const root = isRecord(value) ? value : null
-  const data = root && isRecord(root.data) ? root.data : root
-  if (!data || typeof data.updatedAt !== 'number') return null
-  const state = migrateState(data.state)
+  if (!isRecord(value) || typeof value.updatedAt !== 'number') return null
+  const state = migrateState(value.state)
   if (!state) return null
-  return { updatedAt: data.updatedAt, state }
+  return { updatedAt: value.updatedAt, state }
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -89,36 +89,76 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json()
 }
 
-export async function pullRoom(id: string): Promise<RoomEnvelope | null> {
-  const response = await fetch(`${API}/${id}`, { headers: { Accept: 'application/json' } })
+async function putBlob(envelope: RoomEnvelope): Promise<string> {
+  const response = await fetch(BLOB_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'text/plain' },
+    body: new URLSearchParams({
+      content: JSON.stringify(envelope),
+      syntax: 'json',
+      expiry_days: '365',
+    }),
+  })
+  if (!response.ok) throw new Error(`blob ${response.status}`)
+  const id = (await response.text()).trim().split('/').filter(Boolean).pop() ?? ''
+  if (!BLOB_RE.test(id)) throw new Error('blob id')
+  return id
+}
+
+async function getBlob(id: string): Promise<RoomEnvelope | null> {
+  const response = await fetch(`https://dpaste.com/${id}.txt`, { headers: { Accept: 'text/plain' } })
   if (response.status === 404) return null
-  return envelopeFromUnknown(await readJson(response))
+  if (!response.ok) throw new Error(`blob ${response.status}`)
+  return envelopeFromUnknown(JSON.parse(await response.text()))
+}
+
+async function writePointer(id: string | null, blobId: string, updatedAt: number): Promise<string> {
+  const payload = {
+    name: 'ekipazh',
+    data: { d: blobId, t: String(updatedAt) },
+  }
+  const response = await fetch(id ? `${POINTER_API}/${id}` : POINTER_API, {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const body = await readJson(response)
+  if (id) return id
+  const created = isRecord(body) && typeof body.id === 'string' ? body.id : ''
+  if (!ROOM_RE.test(created)) throw new Error('sync id')
+  return created
+}
+
+function pointerBlobId(value: unknown): string | null {
+  const root = isRecord(value) ? value : null
+  const data = root && isRecord(root.data) ? root.data : root
+  const blobId = data && typeof data.d === 'string' ? data.d : ''
+  return BLOB_RE.test(blobId) ? blobId : null
+}
+
+export async function pullRoom(id: string): Promise<RoomEnvelope | null> {
+  const response = await fetch(`${POINTER_API}/${id}`, { headers: { Accept: 'application/json' } })
+  if (response.status === 404) return null
+  const blobId = pointerBlobId(await readJson(response))
+  if (!blobId) return null
+  return getBlob(blobId)
 }
 
 export async function pushRoom(id: string, state: AppState, updatedAt: number): Promise<void> {
-  const response = await fetch(`${API}/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      name: 'ekipazh',
-      data: { v: 1, updatedAt, state },
-    }),
-  })
-  if (!response.ok) throw new Error(`sync ${response.status}`)
+  const blobId = await putBlob({ updatedAt, state })
+  await writePointer(id, blobId, updatedAt)
 }
 
 export async function createRoom(state: AppState): Promise<{ id: string; updatedAt: number }> {
   const updatedAt = Date.now()
-  const response = await fetch(API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      name: 'ekipazh',
-      data: { v: 1, updatedAt, state },
-    }),
-  })
-  const payload = await readJson(response)
-  const id = isRecord(payload) && typeof payload.id === 'string' ? payload.id : ''
-  if (!ROOM_RE.test(id)) throw new Error('sync id')
-  return { id, updatedAt }
+  const envelope = { updatedAt, state }
+  try {
+    const blobId = await putBlob(envelope)
+    const id = await writePointer(null, blobId, updatedAt)
+    return { id, updatedAt }
+  } catch {
+    const blobId = await putBlob(envelope)
+    const id = await writePointer(null, blobId, updatedAt)
+    return { id, updatedAt }
+  }
 }
